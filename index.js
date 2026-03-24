@@ -288,4 +288,4 @@ if (event.type === 'follow') {
 });
 
 // ── ヘルスチェック ────────────────────────────────────────────
-app.get('/', (req, res) => res.send('スルルン is running 😊')
+app.get('/', (req, res) => res.send('スルルン is running 😊'));
