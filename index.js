@@ -289,3 +289,5 @@ if (event.type === 'follow') {
 
 // ── ヘルスチェック ────────────────────────────────────────────
 app.get('/', (req, res) => res.send('スルルン is running 😊'));
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`スルルン起動中 ポート:${PORT}`));
