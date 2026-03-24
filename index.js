@@ -258,21 +258,24 @@ app.post('/webhook', async (req, res) => {
   res.sendStatus(200);
 
   const events = req.body.events || [];
-  for (const event of events) {
-    // フォローイベント（LINE登録時）
-    if (event.type === 'follow') {
-      const session = getSession(event.source.userId);
-      session.step = 0.5;
-      await replyToLine(event.replyToken, GREETING).catch(() => {});
-      continue;
-    }
+  for (const event of events) {   
+     // フォローイベント（自動起動しない）
+if (event.type === 'follow') {
+  continue;
+} 
 
     if (event.type !== 'message' || event.message.type !== 'text') continue;
 
     const userId = event.source.userId;
     const replyToken = event.replyToken;
     const userMessage = event.message.text.trim();
-
+// 体質診断スタートでスルルン起動
+    if (userMessage === '体質診断スタート') {
+      const session = getSession(userId);
+      session.step = 0.5;
+      await replyToLine(replyToken, GREETING).catch(() => {});
+      continue;
+    }
     try {
       await handleMessage(userId, replyToken, userMessage);
     } catch (err) {
@@ -285,7 +288,4 @@ app.post('/webhook', async (req, res) => {
 });
 
 // ── ヘルスチェック ────────────────────────────────────────────
-app.get('/', (req, res) => res.send('スルルン is running 😊'));
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server started on port ${PORT}`));
+app.get('/', (req, res) => res.send('スルルン is running 😊')
