@@ -122,6 +122,20 @@ async function runDiagnosis(session) {
   return result;
 }
 
+// ── なりたい未来の共感メッセージ生成 ─────────────────────────
+async function runFutureBridge(session) {
+  const a = session.answers;
+  const userPrompt = `${session.name}さんの診断が終わりました。なりたい未来への橋渡しメッセージを生成してください。`;
+
+  const result = await callClaude(
+    getSystemPrompt('future_bridge', { ...a, name: session.name }),
+    [{ role: 'user', content: userPrompt }]
+  );
+
+  session.history.push({ role: 'assistant', content: result });
+  return result;
+}
+
 // ── カウンセリング実行 ────────────────────────────────────────
 async function runCounseling(session, userMessage) {
   session.history.push({ role: 'user', content: userMessage });
@@ -202,16 +216,37 @@ async function handleMessage(userId, replyToken, userMessage) {
       session.step++;
       await replyToLine(replyToken, QUESTIONS[session.step](session.name));
     } else {
+      // replyToken は wait メッセージだけに使う（1回しか使えない）
       await replyToLine(replyToken,
-        `${session.name}さん、ありがとうございます😊\nお話をもとに診ていますので、少しだけお待ちください…`
+        `${session.name}さん、お話を聞かせてもらいました✨\n少しだけお待ちください…`
       );
+
+      // 以降は pushToUser で連続送信
       const diagnosis = await runDiagnosis(session);
-      await replyToLine(replyToken, diagnosis);
+      await pushToUser(userId, diagnosis);
+
+      const futureBridge = await runFutureBridge(session);
+      await pushToUser(userId, futureBridge);
+
+      // 来院誘導を自動送信（1回のみ）
+      session.inviteSent = true;
+      session.handoffSentAt = new Date();
+      await pushToUser(userId, HUMAN_HANDOFF(session.name, BOOKING_URL));
+
+      // スタッフにレポート送信
+      const report = generateReport(
+        { ...session.answers, name: session.name },
+        diagnosis,
+        session.honestyMoments
+      );
+      await pushToStaff(report);
+      scheduleFollowUps(userId, session);
     }
     return;
   }
 
-  // STEP 6: 目標・未来の引き出し〜来院誘導
+  // STEP 6: 来院誘導後のフォロー会話
+  // （来院誘導は診断完了時に自動送信済みのため、ここでは質問・返事への対応のみ）
   if (session.step === 6) {
 
     // 女性スタッフについての質問
@@ -220,33 +255,16 @@ async function handleMessage(userId, replyToken, userMessage) {
       return;
     }
 
-    // 予約誘導タイミング
+    // 診断前に予約キーワードが来た場合（inviteSent前のみ）
     if (shouldHandoff(session, userMessage)) {
-      // スタッフにレポート送信
-      const report = generateReport(
-        { ...session.answers, name: session.name },
-        session.history.find(h => h.role === 'assistant')?.content || '',
-        session.honestyMoments
-      );
-      await pushToStaff(report);
-
-      // 来院誘導を送信（1回のみ）
       session.inviteSent = true;
-      await replyToLine(replyToken, HUMAN_HANDOFF(session.name, BOOKING_URL));
-
-      // 送信時刻を記録してフォローアップをスケジュール
       session.handoffSentAt = new Date();
+      await replyToLine(replyToken, HUMAN_HANDOFF(session.name, BOOKING_URL));
       scheduleFollowUps(userId, session);
-
-      // 少し間を置いてフォローメッセージを送る
-      setTimeout(async () => {
-        await pushToUser(userId, HANDOFF_FOLLOW(session.name)).catch(() => {});
-      }, 3 * 60 * 1000); // 3分後
-
       return;
     }
 
-    // 通常カウンセリング
+    // 通常会話（来院への返事・質問への対応など）
     const reply = await runCounseling(session, userMessage);
     await replyToLine(replyToken, reply);
     return;
