@@ -269,9 +269,18 @@ if (event.type === 'follow') {
     const userId = event.source.userId;
     const replyToken = event.replyToken;
     const userMessage = event.message.text.trim();
-// 体質診断スタートでスルルン起動
+// 体質診断スタートでスルルン起動（診断中はリセットしない）
     if (userMessage === '体質診断スタート') {
       const session = getSession(userId);
+      if (session.step > 0) {
+        // すでに診断が始まっている場合はそのまま続ける
+        const name = session.name || '';
+        const msg = name
+          ? `${name}さん、診断はもう始まっていますよ😊\n続きから話しましょう！`
+          : '診断はもう始まっていますよ😊\n続きから話しましょう！';
+        await replyToLine(replyToken, msg).catch(() => {});
+        continue;
+      }
       session.step = 0.5;
       await replyToLine(replyToken, GREETING).catch(() => {});
       continue;
