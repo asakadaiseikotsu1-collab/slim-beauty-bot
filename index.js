@@ -128,7 +128,7 @@ async function runCounseling(session, userMessage) {
   session.counselingCount++;
 
   const reply = await callClaude(
-    getSystemPrompt('flow', { ...session.answers, name: session.name }),
+    getSystemPrompt('flow', { ...session.answers, name: session.name, bookingUrl: BOOKING_URL }),
     session.history
   );
 
