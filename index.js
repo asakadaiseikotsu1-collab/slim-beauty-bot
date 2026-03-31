@@ -35,6 +35,7 @@ function getSession(userId) {
       counselingCount: 0,
       honestyMoments: [],
       handoffSentAt: null,    // 予約案内を送った時刻
+      inviteSent: false,      // 来院誘導を送信済みか（1回のみ）
       followUpSent: false,    // 24hフォロー送信済みか
       follow3daySent: false   // 3日後フォロー送信済みか
     };
@@ -101,12 +102,10 @@ async function runDiagnosis(session) {
 以下は${session.name}さんの診断回答です。
 
 年齢：${a.q1}
-身長・体重：${a.q2}
-気になる部位：${a.q3}
-ダイエット経験：${a.q4}
-太り始めた時期：${a.q5}
-理想の体重・体型：${a.q6}
-痩せたら嬉しいこと：${a.q7}
+気になる部位：${a.q2}
+ダイエット経験：${a.q3}
+体型が気になり始めた時期：${a.q4}
+今一番つらいこと：${a.q5}
 
 指定のフォーマットで診断結果を作成してください。
 `.trim();
@@ -118,7 +117,7 @@ async function runDiagnosis(session) {
 
   session.history.push({ role: 'user', content: userPrompt });
   session.history.push({ role: 'assistant', content: result });
-  session.step = 8;
+  session.step = 6;
 
   return result;
 }
@@ -129,7 +128,7 @@ async function runCounseling(session, userMessage) {
   session.counselingCount++;
 
   const reply = await callClaude(
-    getSystemPrompt('counseling', { ...session.answers, name: session.name }),
+    getSystemPrompt('flow', { ...session.answers, name: session.name }),
     session.history
   );
 
@@ -149,7 +148,7 @@ const HANDOFF_KEYWORDS = ['相談したい', '予約', '直接', '会いたい',
 const FEMALE_KEYWORDS = ['女性', '女の人', 'レディース', '女'];
 
 function shouldHandoff(session, message) {
-  if (session.counselingCount >= 5) return true;
+  if (session.inviteSent) return false; // 誘導は1回のみ
   return HANDOFF_KEYWORDS.some(kw => message.includes(kw));
 }
 
@@ -195,16 +194,16 @@ async function handleMessage(userId, replyToken, userMessage) {
     return;
   }
 
-  // STEP 1〜7: 診断質問
-  if (session.step >= 1 && session.step <= 7) {
+  // STEP 1〜5: 診断質問
+  if (session.step >= 1 && session.step <= 5) {
     session.answers[`q${session.step}`] = userMessage;
 
-    if (session.step < 7) {
+    if (session.step < 5) {
       session.step++;
       await replyToLine(replyToken, QUESTIONS[session.step](session.name));
     } else {
       await replyToLine(replyToken,
-        `回答ありがとうございます${session.name}さん😊\n診断しています、少々お待ちください…`
+        `${session.name}さん、ありがとうございます😊\nお話をもとに診ていますので、少しだけお待ちください…`
       );
       const diagnosis = await runDiagnosis(session);
       await replyToLine(replyToken, diagnosis);
@@ -212,8 +211,8 @@ async function handleMessage(userId, replyToken, userMessage) {
     return;
   }
 
-  // STEP 8: カウンセリング〜予約誘導
-  if (session.step === 8) {
+  // STEP 6: 目標・未来の引き出し〜来院誘導
+  if (session.step === 6) {
 
     // 女性スタッフについての質問
     if (askingAboutFemaleStaff(userMessage)) {
@@ -231,7 +230,8 @@ async function handleMessage(userId, replyToken, userMessage) {
       );
       await pushToStaff(report);
 
-      // 予約案内を送信
+      // 来院誘導を送信（1回のみ）
+      session.inviteSent = true;
       await replyToLine(replyToken, HUMAN_HANDOFF(session.name, BOOKING_URL));
 
       // 送信時刻を記録してフォローアップをスケジュール
