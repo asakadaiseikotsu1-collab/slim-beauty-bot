@@ -19,6 +19,42 @@ AIコーチ「スルルン」です。
 まずお名前を教えてもらえますか？
 （ニックネームで全然大丈夫ですよ）`;
 
+const ASK_GENDER = (name) => `${name}さん、よろしくお願いします😊
+
+まず性別を教えてください。
+（基礎代謝の計算に使います）
+
+A. 女性
+B. 男性`;
+
+const ASK_HEIGHT = (name) => `ありがとうございます！
+
+身長を教えてください。
+
+例：「158cm」「158」`;
+
+const ASK_WEIGHT = (name) => `では体重を教えてください。
+
+例：「55kg」「55」
+
+おおよその数字で大丈夫ですよ😊`;
+
+const ASK_AGE = (name) => `最後に年齢を教えてください。
+
+例：「52歳」「52」`;
+
+const BMI_RESULT = (name, bmi, idealWeight, bmr) => `${name}さんの診断結果が出ました✨
+
+📊 あなたのカラダデータ
+・BMI：${bmi}
+・適正体重：${idealWeight}kg
+・基礎代謝：${bmr}kcal/日
+
+基礎代謝は、何もしなくても体が燃やすエネルギー。
+この数値を上げることが、太りにくい体質への第一歩なんです😊
+
+もっと詳しく${name}さんの体質を診ていきますね！`;
+
 const QUESTIONS = {
   1: (name) => `${name}さん、よろしくお願いします😊
 
@@ -588,6 +624,11 @@ ${honestyMoments && honestyMoments.length > 0
 
 module.exports = {
   GREETING,
+  ASK_GENDER,
+  ASK_HEIGHT,
+  ASK_WEIGHT,
+  ASK_AGE,
+  BMI_RESULT,
   QUESTIONS,
   HUMAN_HANDOFF,
   HANDOFF_FOLLOW,

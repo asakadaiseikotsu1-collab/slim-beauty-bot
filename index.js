@@ -5,6 +5,11 @@ const {
   getSystemPrompt,
   QUESTIONS,
   GREETING,
+  ASK_GENDER,
+  ASK_HEIGHT,
+  ASK_WEIGHT,
+  ASK_AGE,
+  BMI_RESULT,
   HUMAN_HANDOFF,
   HANDOFF_FOLLOW,
   FEMALE_STAFF_REPLY,
@@ -30,6 +35,13 @@ function getSession(userId) {
     userSessions[userId] = {
       step: 0,
       name: '',
+      gender: '',     // 'female' | 'male'
+      height: 0,      // cm
+      weight: 0,      // kg
+      age: 0,
+      bmi: 0,
+      idealWeight: 0,
+      bmr: 0,
       answers: {},
       history: [],
       counselingCount: 0,
@@ -189,6 +201,28 @@ function scheduleFollowUps(userId, session) {
   }, 3 * 24 * 60 * 60 * 1000);
 }
 
+// ── 数値パース・BMI計算 ───────────────────────────────────────
+function parseNumber(str) {
+  const match = str.match(/[\d.]+/);
+  return match ? parseFloat(match[0]) : null;
+}
+
+function detectGender(str) {
+  if (/女|A|a/i.test(str)) return 'female';
+  if (/男|B|b/i.test(str)) return 'male';
+  return null;
+}
+
+function calcBodyMetrics(gender, height, weight, age) {
+  const h = height / 100; // cm → m
+  const bmi = Math.round((weight / (h * h)) * 10) / 10;
+  const idealWeight = Math.round(h * h * 22 * 10) / 10;
+  const bmr = gender === 'female'
+    ? Math.round(655.1 + (9.563 * weight) + (1.850 * height) - (4.676 * age))
+    : Math.round(66.47 + (13.75 * weight) + (5.003 * height) - (6.755 * age));
+  return { bmi, idealWeight, bmr };
+}
+
 // ── メイン会話ロジック ────────────────────────────────────────
 async function handleMessage(userId, replyToken, userMessage) {
   const session = getSession(userId);
@@ -200,11 +234,78 @@ async function handleMessage(userId, replyToken, userMessage) {
     return;
   }
 
-  // STEP 0.5: 名前を受け取る
+  // STEP 0.5: 名前を受け取る → 性別を聞く
   if (session.step === 0.5) {
     session.name = userMessage.replace(/さん|様/g, '').trim();
+    session.step = 0.6;
+    await replyToLine(replyToken, ASK_GENDER(session.name));
+    return;
+  }
+
+  // STEP 0.6: 性別を受け取る → 身長を聞く
+  if (session.step === 0.6) {
+    const gender = detectGender(userMessage);
+    if (!gender) {
+      await replyToLine(replyToken, `「A. 女性」か「B. 男性」で教えてもらえますか？😊`);
+      return;
+    }
+    session.gender = gender;
+    session.step = 0.7;
+    await replyToLine(replyToken, ASK_HEIGHT(session.name));
+    return;
+  }
+
+  // STEP 0.7: 身長を受け取る → 体重を聞く
+  if (session.step === 0.7) {
+    const height = parseNumber(userMessage);
+    if (!height || height < 100 || height > 220) {
+      await replyToLine(replyToken, `身長をcmで教えてください。例：「158」`);
+      return;
+    }
+    session.height = height;
+    session.step = 0.8;
+    await replyToLine(replyToken, ASK_WEIGHT(session.name));
+    return;
+  }
+
+  // STEP 0.8: 体重を受け取る → 年齢を聞く
+  if (session.step === 0.8) {
+    const weight = parseNumber(userMessage);
+    if (!weight || weight < 25 || weight > 200) {
+      await replyToLine(replyToken, `体重をkgで教えてください。例：「55」`);
+      return;
+    }
+    session.weight = weight;
+    session.step = 0.9;
+    await replyToLine(replyToken, ASK_AGE(session.name));
+    return;
+  }
+
+  // STEP 0.9: 年齢を受け取る → BMI計算 → 結果表示 → Q1へ
+  if (session.step === 0.9) {
+    const age = parseNumber(userMessage);
+    if (!age || age < 10 || age > 100) {
+      await replyToLine(replyToken, `年齢を数字で教えてください。例：「52」`);
+      return;
+    }
+    session.age = age;
+
+    const { bmi, idealWeight, bmr } = calcBodyMetrics(
+      session.gender, session.height, session.weight, session.age
+    );
+    session.bmi = bmi;
+    session.idealWeight = idealWeight;
+    session.bmr = bmr;
+
+    // BMI結果を返してからQ1へ
     session.step = 1;
-    await replyToLine(replyToken, QUESTIONS[1](session.name));
+    await replyToLine(replyToken,
+      BMI_RESULT(session.name, bmi, idealWeight, bmr)
+    );
+    // 少し間を置いてQ1を送る
+    setTimeout(async () => {
+      await pushToUser(userId, QUESTIONS[1](session.name)).catch(() => {});
+    }, 1500);
     return;
   }
 
