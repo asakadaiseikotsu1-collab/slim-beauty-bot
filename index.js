@@ -5,11 +5,6 @@ const {
   getSystemPrompt,
   QUESTIONS,
   GREETING,
-  ASK_GENDER,
-  ASK_HEIGHT,
-  ASK_WEIGHT,
-  ASK_AGE,
-  BMI_RESULT,
   HUMAN_HANDOFF,
   HANDOFF_FOLLOW,
   FEMALE_STAFF_REPLY,
@@ -35,19 +30,11 @@ function getSession(userId) {
     userSessions[userId] = {
       step: 0,
       name: '',
-      gender: '',     // 'female' | 'male'
-      height: 0,      // cm
-      weight: 0,      // kg
-      age: 0,
-      bmi: 0,
-      idealWeight: 0,
-      bmr: 0,
       answers: {},
       history: [],
       counselingCount: 0,
       honestyMoments: [],
       handoffSentAt: null,    // 予約案内を送った時刻
-      inviteSent: false,      // 来院誘導を送信済みか（1回のみ）
       followUpSent: false,    // 24hフォロー送信済みか
       follow3daySent: false   // 3日後フォロー送信済みか
     };
@@ -114,10 +101,12 @@ async function runDiagnosis(session) {
 以下は${session.name}さんの診断回答です。
 
 年齢：${a.q1}
-気になる部位：${a.q2}
-ダイエット経験：${a.q3}
-体型が気になり始めた時期：${a.q4}
-今一番つらいこと：${a.q5}
+身長・体重：${a.q2}
+気になる部位：${a.q3}
+ダイエット経験：${a.q4}
+太り始めた時期：${a.q5}
+理想の体重・体型：${a.q6}
+痩せたら嬉しいこと：${a.q7}
 
 指定のフォーマットで診断結果を作成してください。
 `.trim();
@@ -129,22 +118,8 @@ async function runDiagnosis(session) {
 
   session.history.push({ role: 'user', content: userPrompt });
   session.history.push({ role: 'assistant', content: result });
-  session.step = 6;
+  session.step = 8;
 
-  return result;
-}
-
-// ── なりたい未来の共感メッセージ生成 ─────────────────────────
-async function runFutureBridge(session) {
-  const a = session.answers;
-  const userPrompt = `${session.name}さんの診断が終わりました。なりたい未来への橋渡しメッセージを生成してください。`;
-
-  const result = await callClaude(
-    getSystemPrompt('future_bridge', { ...a, name: session.name }),
-    [{ role: 'user', content: userPrompt }]
-  );
-
-  session.history.push({ role: 'assistant', content: result });
   return result;
 }
 
@@ -154,7 +129,7 @@ async function runCounseling(session, userMessage) {
   session.counselingCount++;
 
   const reply = await callClaude(
-    getSystemPrompt('flow', { ...session.answers, name: session.name, bookingUrl: BOOKING_URL }),
+    getSystemPrompt('counseling', { ...session.answers, name: session.name }),
     session.history
   );
 
@@ -174,7 +149,7 @@ const HANDOFF_KEYWORDS = ['相談したい', '予約', '直接', '会いたい',
 const FEMALE_KEYWORDS = ['女性', '女の人', 'レディース', '女'];
 
 function shouldHandoff(session, message) {
-  if (session.inviteSent) return false; // 誘導は1回のみ
+  if (session.counselingCount >= 5) return true;
   return HANDOFF_KEYWORDS.some(kw => message.includes(kw));
 }
 
@@ -201,28 +176,6 @@ function scheduleFollowUps(userId, session) {
   }, 3 * 24 * 60 * 60 * 1000);
 }
 
-// ── 数値パース・BMI計算 ───────────────────────────────────────
-function parseNumber(str) {
-  const match = str.match(/[\d.]+/);
-  return match ? parseFloat(match[0]) : null;
-}
-
-function detectGender(str) {
-  if (/女|A|a/i.test(str)) return 'female';
-  if (/男|B|b/i.test(str)) return 'male';
-  return null;
-}
-
-function calcBodyMetrics(gender, height, weight, age) {
-  const h = height / 100; // cm → m
-  const bmi = Math.round((weight / (h * h)) * 10) / 10;
-  const idealWeight = Math.round(h * h * 22 * 10) / 10;
-  const bmr = gender === 'female'
-    ? Math.round(655.1 + (9.563 * weight) + (1.850 * height) - (4.676 * age))
-    : Math.round(66.47 + (13.75 * weight) + (5.003 * height) - (6.755 * age));
-  return { bmi, idealWeight, bmr };
-}
-
 // ── メイン会話ロジック ────────────────────────────────────────
 async function handleMessage(userId, replyToken, userMessage) {
   const session = getSession(userId);
@@ -234,121 +187,33 @@ async function handleMessage(userId, replyToken, userMessage) {
     return;
   }
 
-  // STEP 0.5: 名前を受け取る → 性別を聞く
+  // STEP 0.5: 名前を受け取る
   if (session.step === 0.5) {
     session.name = userMessage.replace(/さん|様/g, '').trim();
-    session.step = 0.6;
-    await replyToLine(replyToken, ASK_GENDER(session.name));
-    return;
-  }
-
-  // STEP 0.6: 性別を受け取る → 身長を聞く
-  if (session.step === 0.6) {
-    const gender = detectGender(userMessage);
-    if (!gender) {
-      await replyToLine(replyToken, `「A. 女性」か「B. 男性」で教えてもらえますか？😊`);
-      return;
-    }
-    session.gender = gender;
-    session.step = 0.7;
-    await replyToLine(replyToken, ASK_HEIGHT(session.name));
-    return;
-  }
-
-  // STEP 0.7: 身長を受け取る → 体重を聞く
-  if (session.step === 0.7) {
-    const height = parseNumber(userMessage);
-    if (!height || height < 100 || height > 220) {
-      await replyToLine(replyToken, `身長をcmで教えてください。例：「158」`);
-      return;
-    }
-    session.height = height;
-    session.step = 0.8;
-    await replyToLine(replyToken, ASK_WEIGHT(session.name));
-    return;
-  }
-
-  // STEP 0.8: 体重を受け取る → 年齢を聞く
-  if (session.step === 0.8) {
-    const weight = parseNumber(userMessage);
-    if (!weight || weight < 25 || weight > 200) {
-      await replyToLine(replyToken, `体重をkgで教えてください。例：「55」`);
-      return;
-    }
-    session.weight = weight;
-    session.step = 0.9;
-    await replyToLine(replyToken, ASK_AGE(session.name));
-    return;
-  }
-
-  // STEP 0.9: 年齢を受け取る → BMI計算 → 結果表示 → Q1へ
-  if (session.step === 0.9) {
-    const age = parseNumber(userMessage);
-    if (!age || age < 10 || age > 100) {
-      await replyToLine(replyToken, `年齢を数字で教えてください。例：「52」`);
-      return;
-    }
-    session.age = age;
-
-    const { bmi, idealWeight, bmr } = calcBodyMetrics(
-      session.gender, session.height, session.weight, session.age
-    );
-    session.bmi = bmi;
-    session.idealWeight = idealWeight;
-    session.bmr = bmr;
-
-    // BMI結果を返してからQ1へ
     session.step = 1;
-    await replyToLine(replyToken,
-      BMI_RESULT(session.name, bmi, idealWeight, bmr)
-    );
-    // 少し間を置いてQ1を送る
-    setTimeout(async () => {
-      await pushToUser(userId, QUESTIONS[1](session.name)).catch(() => {});
-    }, 1500);
+    await replyToLine(replyToken, QUESTIONS[1](session.name));
     return;
   }
 
-  // STEP 1〜5: 診断質問
-  if (session.step >= 1 && session.step <= 5) {
+  // STEP 1〜7: 診断質問
+  if (session.step >= 1 && session.step <= 7) {
     session.answers[`q${session.step}`] = userMessage;
 
-    if (session.step < 5) {
+    if (session.step < 7) {
       session.step++;
       await replyToLine(replyToken, QUESTIONS[session.step](session.name));
     } else {
-      // replyToken は wait メッセージだけに使う（1回しか使えない）
       await replyToLine(replyToken,
-        `${session.name}さん、お話を聞かせてもらいました✨\n少しだけお待ちください…`
+        `回答ありがとうございます${session.name}さん😊\n診断しています、少々お待ちください…`
       );
-
-      // 以降は pushToUser で連続送信
       const diagnosis = await runDiagnosis(session);
-      await pushToUser(userId, diagnosis);
-
-      const futureBridge = await runFutureBridge(session);
-      await pushToUser(userId, futureBridge);
-
-      // 来院誘導を自動送信（1回のみ）
-      session.inviteSent = true;
-      session.handoffSentAt = new Date();
-      await pushToUser(userId, HUMAN_HANDOFF(session.name, BOOKING_URL));
-
-      // スタッフにレポート送信
-      const report = generateReport(
-        { ...session.answers, name: session.name },
-        diagnosis,
-        session.honestyMoments
-      );
-      await pushToStaff(report);
-      scheduleFollowUps(userId, session);
+      await replyToLine(replyToken, diagnosis);
     }
     return;
   }
 
-  // STEP 6: 来院誘導後のフォロー会話
-  // （来院誘導は診断完了時に自動送信済みのため、ここでは質問・返事への対応のみ）
-  if (session.step === 6) {
+  // STEP 8: カウンセリング〜予約誘導
+  if (session.step === 8) {
 
     // 女性スタッフについての質問
     if (askingAboutFemaleStaff(userMessage)) {
@@ -356,16 +221,32 @@ async function handleMessage(userId, replyToken, userMessage) {
       return;
     }
 
-    // 診断前に予約キーワードが来た場合（inviteSent前のみ）
+    // 予約誘導タイミング
     if (shouldHandoff(session, userMessage)) {
-      session.inviteSent = true;
-      session.handoffSentAt = new Date();
+      // スタッフにレポート送信
+      const report = generateReport(
+        { ...session.answers, name: session.name },
+        session.history.find(h => h.role === 'assistant')?.content || '',
+        session.honestyMoments
+      );
+      await pushToStaff(report);
+
+      // 予約案内を送信
       await replyToLine(replyToken, HUMAN_HANDOFF(session.name, BOOKING_URL));
+
+      // 送信時刻を記録してフォローアップをスケジュール
+      session.handoffSentAt = new Date();
       scheduleFollowUps(userId, session);
+
+      // 少し間を置いてフォローメッセージを送る
+      setTimeout(async () => {
+        await pushToUser(userId, HANDOFF_FOLLOW(session.name)).catch(() => {});
+      }, 3 * 60 * 1000); // 3分後
+
       return;
     }
 
-    // 通常会話（来院への返事・質問への対応など）
+    // 通常カウンセリング
     const reply = await runCounseling(session, userMessage);
     await replyToLine(replyToken, reply);
     return;
@@ -377,33 +258,21 @@ app.post('/webhook', async (req, res) => {
   res.sendStatus(200);
 
   const events = req.body.events || [];
-  for (const event of events) {   
-     // フォローイベント（自動起動しない）
-if (event.type === 'follow') {
-  continue;
-} 
+  for (const event of events) {
+    // フォローイベント（LINE登録時）
+    if (event.type === 'follow') {
+      const session = getSession(event.source.userId);
+      session.step = 0.5;
+      await replyToLine(event.replyToken, GREETING).catch(() => {});
+      continue;
+    }
 
     if (event.type !== 'message' || event.message.type !== 'text') continue;
 
     const userId = event.source.userId;
     const replyToken = event.replyToken;
     const userMessage = event.message.text.trim();
-// 体質診断スタートでスルルン起動（診断中はリセットしない）
-    if (userMessage === '体質診断スタート') {
-      const session = getSession(userId);
-      if (session.step > 0) {
-        // すでに診断が始まっている場合はそのまま続ける
-        const name = session.name || '';
-        const msg = name
-          ? `${name}さん、診断はもう始まっていますよ😊\n続きから話しましょう！`
-          : '診断はもう始まっていますよ😊\n続きから話しましょう！';
-        await replyToLine(replyToken, msg).catch(() => {});
-        continue;
-      }
-      session.step = 0.5;
-      await replyToLine(replyToken, GREETING).catch(() => {});
-      continue;
-    }
+
     try {
       await handleMessage(userId, replyToken, userMessage);
     } catch (err) {
@@ -417,5 +286,6 @@ if (event.type === 'follow') {
 
 // ── ヘルスチェック ────────────────────────────────────────────
 app.get('/', (req, res) => res.send('スルルン is running 😊'));
+
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`スルルン起動中 ポート:${PORT}`));
+app.listen(PORT, () => console.log(`Server started on port ${PORT}`));
