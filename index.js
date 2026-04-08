@@ -86,7 +86,7 @@ async function pushToStaff(message) {
 // ── Claude API ────────────────────────────────────────────────
 async function callClaude(systemPrompt, history) {
   const response = await anthropic.messages.create({
-    model: 'claude-haiku-4-5',
+    model: 'claude-3-5-sonnet-20240620',
     max_tokens: 1024,
     system: systemPrompt,
     messages: history
