@@ -208,6 +208,7 @@ async function handleMessage(userId, replyToken, userMessage) {
       );
       const diagnosis = await runDiagnosis(session);
       await replyToLine(replyToken, diagnosis);
+    await pushToUser(userId, `${session.name}さん、診断結果はいかがでしたか？😊\nご不明な点や、もっと詳しく知りたいことがあれば、何でもお気軽に話しかけてください。\n\n実際にカウンセリングを受けてみませんか？\nあなたの体質に合ったプログラムをご提案できます😊`);
     }
     return;
   }
