@@ -4,13 +4,13 @@ const Anthropic = require('@anthropic-ai/sdk');
 const {
   getSystemPrompt,
   QUESTIONS,
+  REACTIONS,
   GREETING,
   HUMAN_HANDOFF,
   HANDOFF_FOLLOW,
   FEMALE_STAFF_REPLY,
   FOLLOW_24H,
   FOLLOW_3DAYS,
-  BEFORE_VISIT,
   generateReport
 } = require('./prompts');
 
@@ -20,9 +20,8 @@ app.use(express.json());
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const LINE_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN;
 const STAFF_LINE_ID = process.env.STAFF_LINE_USER_ID;
-const BOOKING_URL = process.env.BOOKING_URL || 'https://YOUR_BOOKING_URL';
+const BOOKING_URL = process.env.BOOKING_URL || 'https://calendar.app.google/sjU1jaTYB8L9Nw5TA';
 
-// ── セッション管理 ────────────────────────────────────────────
 const userSessions = {};
 
 function getSession(userId) {
@@ -34,15 +33,14 @@ function getSession(userId) {
       history: [],
       counselingCount: 0,
       honestyMoments: [],
-      handoffSentAt: null,    // 予約案内を送った時刻
-      followUpSent: false,    // 24hフォロー送信済みか
-      follow3daySent: false   // 3日後フォロー送信済みか
+      handoffSentAt: null,
+      followUpSent: false,
+      follow3daySent: false
     };
   }
   return userSessions[userId];
 }
 
-// ── LINE返信 ──────────────────────────────────────────────────
 async function replyToLine(replyToken, messages) {
   const msgs = Array.isArray(messages) ? messages : [messages];
   await axios.post('https://api.line.me/v2/bot/message/reply', {
@@ -56,7 +54,6 @@ async function replyToLine(replyToken, messages) {
   });
 }
 
-// ── プッシュメッセージ（フォローアップ用）────────────────────
 async function pushToUser(userId, message) {
   await axios.post('https://api.line.me/v2/bot/message/push', {
     to: userId,
@@ -69,7 +66,6 @@ async function pushToUser(userId, message) {
   });
 }
 
-// ── スタッフにプッシュ通知 ────────────────────────────────────
 async function pushToStaff(message) {
   if (!STAFF_LINE_ID) return;
   await axios.post('https://api.line.me/v2/bot/message/push', {
@@ -83,7 +79,6 @@ async function pushToStaff(message) {
   });
 }
 
-// ── Claude API ────────────────────────────────────────────────
 async function callClaude(systemPrompt, history) {
   const response = await anthropic.messages.create({
     model: 'claude-opus-4-5',
@@ -94,7 +89,6 @@ async function callClaude(systemPrompt, history) {
   return response.content[0].text;
 }
 
-// ── 診断実行 ──────────────────────────────────────────────────
 async function runDiagnosis(session) {
   const a = session.answers;
   const userPrompt = `
@@ -123,7 +117,6 @@ async function runDiagnosis(session) {
   return result;
 }
 
-// ── カウンセリング実行 ────────────────────────────────────────
 async function runCounseling(session, userMessage) {
   session.history.push({ role: 'user', content: userMessage });
   session.counselingCount++;
@@ -135,8 +128,7 @@ async function runCounseling(session, userMessage) {
 
   session.history.push({ role: 'assistant', content: reply });
 
-  // 本音ワードを記録
-  const emotionWords = ['したい', '辛い', 'つらい', '嬉しい', '痛い', '不安', '怖い', '悲しい', '恥ずかしい'];
+  const emotionWords = ['辛い', 'つらい', '嬉しい', '痛い', '不安', '怖い', '悲しい', '躊躇'];
   if (emotionWords.some(w => userMessage.includes(w))) {
     session.honestyMoments.push(userMessage);
   }
@@ -144,9 +136,8 @@ async function runCounseling(session, userMessage) {
   return reply;
 }
 
-// ── 人間誘導判定 ──────────────────────────────────────────────
 const HANDOFF_KEYWORDS = ['相談したい', '予約', '直接', '会いたい', '行きたい', '申し込み', '来院'];
-const FEMALE_KEYWORDS = ['女性', '女の人', 'レディース', '女'];
+const FEMALE_KEYWORDS = ['女性', 'レディース'];
 
 function shouldHandoff(session, message) {
   if (session.counselingCount >= 5) return true;
@@ -157,9 +148,7 @@ function askingAboutFemaleStaff(message) {
   return FEMALE_KEYWORDS.some(kw => message.includes(kw));
 }
 
-// ── フォローアップスケジューラー ────────────────────────────
 function scheduleFollowUps(userId, session) {
-  // 24時間後フォロー
   setTimeout(async () => {
     if (!session.followUpSent && session.handoffSentAt) {
       session.followUpSent = true;
@@ -167,7 +156,6 @@ function scheduleFollowUps(userId, session) {
     }
   }, 24 * 60 * 60 * 1000);
 
-  // 3日後フォロー
   setTimeout(async () => {
     if (!session.follow3daySent && session.handoffSentAt) {
       session.follow3daySent = true;
@@ -176,18 +164,17 @@ function scheduleFollowUps(userId, session) {
   }, 3 * 24 * 60 * 60 * 1000);
 }
 
-// ── メイン会話ロジック ────────────────────────────────────────
 async function handleMessage(userId, replyToken, userMessage) {
   const session = getSession(userId);
 
-  // STEP 0: 挨拶
+  // 初回メッセージ
   if (session.step === 0) {
     session.step = 0.5;
     await replyToLine(replyToken, GREETING);
     return;
   }
 
-  // STEP 0.5: 名前を受け取る
+  // 名前取得
   if (session.step === 0.5) {
     session.name = userMessage.replace(/さん|様/g, '').trim();
     session.step = 1;
@@ -195,71 +182,89 @@ async function handleMessage(userId, replyToken, userMessage) {
     return;
   }
 
-  // STEP 1〜7: 診断質問
+  // 質問1〜7：共感リアクション → 次の質問
   if (session.step >= 1 && session.step <= 7) {
     session.answers[`q${session.step}`] = userMessage;
 
     if (session.step < 7) {
+      const reaction = REACTIONS[session.step + 1]
+        ? REACTIONS[session.step](session.name, userMessage)
+        : null;
+      const nextQuestion = QUESTIONS[session.step + 1](session.name);
       session.step++;
-      await replyToLine(replyToken, QUESTIONS[session.step](session.name));
+
+      if (reaction) {
+        // リアクションと次の質問を別メッセージで送る（自然な会話感）
+        await replyToLine(replyToken, [reaction, nextQuestion]);
+      } else {
+        await replyToLine(replyToken, nextQuestion);
+      }
     } else {
-      await replyToLine(replyToken,
-        `回答ありがとうございます${session.name}さん😊\n診断しています、少々お待ちください…`
-      );
+      // 質問7の回答後
+      const reaction = REACTIONS[7](session.name, userMessage);
+      await replyToLine(replyToken, [
+        reaction,
+        `${session.name}さん、7つの質問お疲れさまでした😊\n今すぐ診断結果をお送りします。\n少々お待ちください…`
+      ]);
       const diagnosis = await runDiagnosis(session);
-      await replyToLine(replyToken, diagnosis);
+      await pushToUser(userId, diagnosis);
+
+      // 2分後にカウンセリング誘導
+      setTimeout(async () => {
+        await pushToUser(userId,
+          `${session.name}さん、診断結果はいかがでしたか？\n\n気になることや、もっと詳しく知りたいことがあれば、何でも話してください。\n\nフルルンがしっかり聞きます😊`
+        ).catch(() => {});
+      }, 2 * 60 * 1000);
     }
     return;
   }
 
-  // STEP 8: カウンセリング〜予約誘導
+  // カウンセリングフェーズ
   if (session.step === 8) {
 
-    // 女性スタッフについての質問
     if (askingAboutFemaleStaff(userMessage)) {
       await replyToLine(replyToken, FEMALE_STAFF_REPLY(session.name, BOOKING_URL));
       return;
     }
 
-    // 予約誘導タイミング
     if (shouldHandoff(session, userMessage)) {
-      // スタッフにレポート送信
       const report = generateReport(
         { ...session.answers, name: session.name },
         session.history.find(h => h.role === 'assistant')?.content || '',
         session.honestyMoments
       );
       await pushToStaff(report);
-
-      // 予約案内を送信
       await replyToLine(replyToken, HUMAN_HANDOFF(session.name, BOOKING_URL));
-
-      // 送信時刻を記録してフォローアップをスケジュール
       session.handoffSentAt = new Date();
       scheduleFollowUps(userId, session);
 
-      // 少し間を置いてフォローメッセージを送る
       setTimeout(async () => {
         await pushToUser(userId, HANDOFF_FOLLOW(session.name)).catch(() => {});
-      }, 3 * 60 * 1000); // 3分後
+      }, 3 * 60 * 1000);
 
       return;
     }
 
-    // 通常カウンセリング
     const reply = await runCounseling(session, userMessage);
-    await replyToLine(replyToken, reply);
+
+    // カウンセリング3回目でカウンセリング誘導を追加
+    if (session.counselingCount === 3) {
+      await replyToLine(replyToken, [
+        reply,
+        `${session.name}さん、もし直接お話ししたい場合は、無料カウンセリングにお越しください😊\n朝霞台駅南口から徒歩1分です。\n「予約したい」と送っていただければご案内します。`
+      ]);
+    } else {
+      await replyToLine(replyToken, reply);
+    }
     return;
   }
 }
 
-// ── LINE Webhook ──────────────────────────────────────────────
 app.post('/webhook', async (req, res) => {
   res.sendStatus(200);
 
   const events = req.body.events || [];
   for (const event of events) {
-    // フォローイベント（LINE登録時）
     if (event.type === 'follow') {
       const session = getSession(event.source.userId);
       session.step = 0.5;
@@ -276,16 +281,15 @@ app.post('/webhook', async (req, res) => {
     try {
       await handleMessage(userId, replyToken, userMessage);
     } catch (err) {
-      console.error('Error:', err.message);
+      console.error('エラー:', err.message);
       await replyToLine(replyToken,
-        '申し訳ありません、少し時間をおいてもう一度送ってみてください。'
+        '少し時間をおいて、もう一度送ってみてください。'
       ).catch(() => {});
     }
   }
 });
 
-// ── ヘルスチェック ────────────────────────────────────────────
-app.get('/', (req, res) => res.send('スルルン is running 😊'));
+app.get('/', (req, res) => res.send('フルルンが動いています😊'));
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server started on port ${PORT}`));
+app.listen(PORT, () => console.log(`サーバーがポート ${PORT} で起動しました`));
