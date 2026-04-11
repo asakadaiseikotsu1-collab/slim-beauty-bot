@@ -20,7 +20,7 @@ app.use(express.json());
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const LINE_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN;
 const STAFF_LINE_ID = process.env.STAFF_LINE_USER_ID;
-const BOOKING_URL = process.env.BOOKING_URL || 'https://YOUR_BOOKING_URL';
+const BOOKING_URL = process.env.BOOKING_URL || 'https://calendar.app.google/sjU1jaTYB8L9Nw5TA';
 
 // ── セッション管理 ────────────────────────────────────────────
 const userSessions = {};
