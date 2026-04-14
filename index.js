@@ -1,3 +1,4 @@
+const { calcBMIAndPrediction } = require('./calc');
 const express = require('express');
 const axios = require('axios');
 const Anthropic = require('@anthropic-ai/sdk');
