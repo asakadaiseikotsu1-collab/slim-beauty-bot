@@ -275,7 +275,7 @@ app.post('/webhook', async (req, res) => {
         // プレゼント2通目: 無料プレゼント案内（登録特典）
         await new Promise(r => setTimeout(r, 1000));
         await pushToUser(userId,
-          `友だち追加ありがとうございます😊\n\n登録特典として、\n「50代から変わる体質改善ガイド」\nをプレゼントします。\n\nhttps://asakadaiseikotsu1-collab.github.io/slim-beauty-asakadai/`
+          `友だち追加ありがとうございます😊\n\n`
         );
 
         // プレゼント3通目: 診断への誘導
