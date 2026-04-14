@@ -99,6 +99,7 @@ async function callClaude(systemPrompt, history) {
 // ── 診断実行 ──────────────────────────────────────────────────
 async function runDiagnosis(session) {
   const a = session.answers;
+  const prediction = calcBMIAndPrediction(a.q2 || '');
   const userPrompt = `
 以下は${session.name}さんの診断回答です。
 
@@ -109,6 +110,9 @@ async function runDiagnosis(session) {
 太り始めた時期：${a.q5}
 理想の体重・体型：${a.q6}
 痩せたら嬉しいこと：${a.q7}
+
+耳ツボ減量予測データ（必ず診断結果に含めること）：
+${prediction ? `1ヶ月目：約${prediction.m1}kg減、2ヶ月目：約${prediction.m2}kg減、3ヶ月目：約${prediction.m3}kg減、3ヶ月合計：約${prediction.total}kg減` : '身長・体重データなし'}
 
 指定のフォーマットで診断結果を作成してください。
 `.trim();
